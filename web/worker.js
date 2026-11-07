@@ -9,10 +9,49 @@ let stopper = null;
 
 const post = (type, data = {}) => self.postMessage({ type, ...data });
 
-async function init({ transformersUrl, modelHost, wasmPaths }) {
+// ---- bundle mode (published artifact): model files and the ONNX Runtime .wasm ship inside the page
+// as gzip+base64 text chunks, because the artifact host only lets the page fetch its own files.
+async function loadChunks(spec, base) {
+  const parts = await Promise.all(spec.chunks.map((u) => fetch(new URL(u, base)).then((r) => { if (!r.ok) throw new Error(`bundle ${u}: ${r.status}`); return r.text(); })));
+  const b64 = parts.join('');
+  const bin = atob(b64); const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  if (!spec.gzip) return u8.buffer;
+  return new Response(new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+}
+function installBundleFetch(bundle, base) {
+  const orig = T.env.fetch;
+  const cache = new Map();
+  const get = (name) => {
+    if (!cache.has(name)) {
+      const spec = bundle.files[name];
+      cache.set(name, typeof spec === 'string' ? fetch(new URL(spec, base)).then((r) => r.arrayBuffer()) : loadChunks(spec, base));
+    }
+    return cache.get(name);
+  };
+  const prefix = bundle.modelId + '/';
+  T.env.fetch = async (url, opts) => {
+    const u = String(url);
+    const at = u.indexOf(prefix);
+    if (at >= 0) {
+      const name = u.slice(at + prefix.length).replace(/^resolve\/[^/]+\//, '');
+      if (!(name in bundle.files)) return new Response('not bundled', { status: 404 });
+      const buf = await get(name);
+      return new Response(buf, { status: 200, headers: { 'content-length': String(buf.byteLength), 'content-type': name.endsWith('.json') ? 'application/json' : 'application/octet-stream' } });
+    }
+    return orig(url, opts);
+  };
+}
+
+async function init({ transformersUrl, modelHost, wasmPaths, bundle, base }) {
   if (T) return;
   T = await import(transformersUrl);
   T.env.allowLocalModels = false;
+  if (bundle) {
+    installBundleFetch(bundle, base);
+    post('log', { msg: 'bundle mode: loading ONNX Runtime wasm from the page' });
+    T.env.backends.onnx.wasm.wasmBinary = await loadChunks(bundle.ortWasm, base);
+  }
   if (modelHost) {
     // self-hosted mirror laid out as <host>/<org>/<model>/<file> instead of the Hugging Face Hub
     T.env.remoteHost = modelHost.endsWith('/') ? modelHost : modelHost + '/';
@@ -31,9 +70,9 @@ const progressCb = (which) => (p) => {
   }
 };
 
-async function loadEmbedder(modelId) {
+async function loadEmbedder(modelId, dtype = 'fp32') {
   const t0 = performance.now();
-  embedder = await T.pipeline('feature-extraction', modelId, { device: 'wasm', dtype: 'fp32', progress_callback: progressCb('embedder') });
+  embedder = await T.pipeline('feature-extraction', modelId, { device: 'wasm', dtype, progress_callback: progressCb('embedder') });
   post('ready', { which: 'embedder', ms: performance.now() - t0 });
 }
 
@@ -171,7 +210,7 @@ self.onmessage = async ({ data }) => {
   try {
     switch (data.type) {
       case 'init': await init(data); post('inited'); break;
-      case 'load-embedder': await loadEmbedder(data.modelId); break;
+      case 'load-embedder': await loadEmbedder(data.modelId, data.dtype); break;
       case 'embed': await embed(data.text); break;
       case 'load-llm': await loadLLM(data); break;
       case 'generate': await generate(data); break;

@@ -39,6 +39,7 @@ function startWorker() {
   S.worker.onerror = (e) => setStatus(`worker error: ${e.message}`);
   S.worker.postMessage({
     type: 'init', transformersUrl: CONFIG.transformersUrl, modelHost: CONFIG.modelHost, wasmPaths: CONFIG.wasmPaths,
+    bundle: CONFIG.bundle, base: location.href,
   });
 }
 function waitFor(pred) {
@@ -71,7 +72,7 @@ function onProgress(m) {
 async function ensureEmbedder() {
   if (S.embedReady) return;
   const p = $('#pill-embed'); p.className = 'pill busy'; p.textContent = 'embedder: loading';
-  S.worker.postMessage({ type: 'load-embedder', modelId: CONFIG.embedModel });
+  S.worker.postMessage({ type: 'load-embedder', modelId: CONFIG.embedModel, dtype: CONFIG.bundle?.embedDtype || 'fp32' });
   const r = await waitFor((m) => m.type === 'ready' && m.which === 'embedder');
   S.embedReady = true; p.className = 'pill ok'; p.textContent = `embedder: MiniLM-L6 · ${ms(r.ms)}`;
 }
@@ -161,6 +162,7 @@ async function ask() {
     updateSpace();
 
     // 6. generate
+    if (CONFIG.generator === 'claude') { await generateWithClaude(messages, run); return; }
     stage('generate', 'active', 'loading model…'); setStatus('loading LLM (first time downloads the weights)…');
     $('#gen-stats').innerHTML = '<div class="progress" id="prog-llm"><div></div></div>';
     await ensureLLM();
@@ -188,6 +190,47 @@ async function ask() {
   } finally {
     S.busy = false; $('#ask').disabled = false; $('#stop').disabled = true;
   }
+}
+
+// ------------------------------------------------------------------ generation through Claude (published artifact)
+async function generateWithClaude(messages, run) {
+  stage('prompt', 'done', `≈${run.ctx.used} context tokens`);
+  stage('generate', 'active', 'asking Claude…');
+  const sample = window.claude?.use ? await window.claude.use('sample') : null;
+  if (!sample) throw new Error('Claude generation is not available in this view. Open the published artifact on claude.ai, or run the page locally to use the in-browser CPU model.');
+  setStatus('Claude is writing…');
+  // `sample` takes user/assistant turns only: fold the system instructions into the user turn
+  const input = [{ role: 'user', content: `${messages[0].content}\n\n${messages[1].content}` }];
+  const t0 = performance.now(); let shown = '', chunks = 0, tFirst = null;
+  run.chunks = [];
+  const res = await sample(input, {
+    cache: false, modelTier: 'quick',
+    onText: ({ text }) => {
+      if (!text || text === shown || !text.startsWith(shown)) { if (text && !text.startsWith(shown)) { $('#answer').textContent = ''; shown = ''; } else return; }
+      const delta = text.slice(shown.length); shown = text;
+      const now = performance.now(); if (tFirst === null) tFirst = now;
+      const span = document.createElement('span'); span.className = 'gt'; span.textContent = delta;
+      span.style.background = chunks % 2 ? 'hsla(220,70%,55%,.14)' : 'hsla(25,90%,55%,.16)';
+      span.title = `chunk ${chunks} · ${delta.length} chars · +${(now - t0).toFixed(0)} ms`;
+      $('#answer').append(span);
+      run.chunks.push({ i: chunks, t: now - t0, chars: shown.length }); chunks++;
+      stage('generate', 'active', `${chunks} chunks`);
+      drawChunkTimeline(run);
+    },
+  });
+  if (!shown && res?.text) $('#answer').textContent = res.text;
+  const total = performance.now() - t0;
+  stage('generate', 'done', `${chunks} chunks · ${ms(total)}`);
+  $('#gen-stats').textContent = `written by Claude through the artifact (not on your CPU) · first text after ${ms((tFirst ?? performance.now()) - t0)} · ${ms(total)} total. Per-token probabilities are only visible with the in-browser CPU model (run the page with \`npm run serve\`).`;
+  linkCitations();
+  setStatus(`done in ${ms(performance.now() - run.t0)}`);
+}
+function drawChunkTimeline(run) {
+  $('#nt-label').textContent = 'Claude streams text chunks; it does not expose next-token probabilities';
+  Plotly.react('timeline', [{ x: run.chunks.map((c) => c.t / 1000), y: run.chunks.map((c) => c.chars), mode: 'lines+markers', name: 'characters written', line: { color: css('--accent') } }], {
+    margin: { l: 40, r: 10, t: 4, b: 28 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: css('--ink'), size: 10 },
+    xaxis: { title: { text: 'seconds', font: { size: 10 } }, gridcolor: css('--line') }, yaxis: { title: { text: 'chars', font: { size: 10 } }, gridcolor: css('--line') },
+  }, { displayModeBar: false, responsive: true });
 }
 
 // ------------------------------------------------------------------ renderers: stages 1-5
@@ -530,6 +573,7 @@ function drawParcoords() {
 // Can this page reach the hosts the models come from? Shown as a pill so a blocked host is obvious.
 async function checkNetwork() {
   const pill = $('#pill-net');
+  if (CONFIG.bundle) { pill.className = 'pill ok'; pill.textContent = 'models: bundled in this page'; return; }
   const probe = async (url) => { try { const r = await fetch(url, { method: 'GET', cache: 'no-store' }); return r.ok; } catch { return false; } };
   const hub = CONFIG.modelHost ? CONFIG.modelHost.replace(/\/$/, '') + '/' + CONFIG.embedModel + '/config.json'
     : `https://huggingface.co/${CONFIG.embedModel}/resolve/main/config.json`;
@@ -549,7 +593,10 @@ function activateTab(name) {
 async function boot() {
   $('#examples').innerHTML = EXAMPLES.map((e) => `<button class="ghost">${esc(e)}</button>`).join('');
   $('#examples').onclick = (ev) => { if (ev.target.tagName === 'BUTTON') { $('#q').value = ev.target.textContent; ask(); } };
-  $('#llm').innerHTML = CONFIG.llms.map((l) => `<option value="${l.id}">${esc(l.label)}</option>`).join('');
+  $('#llm').innerHTML = CONFIG.generator === 'claude'
+    ? '<option value="claude">Claude (via the artifact; CPU models need Hugging Face access)</option>'
+    : CONFIG.llms.map((l) => `<option value="${l.id}">${esc(l.label)}</option>`).join('');
+  if (CONFIG.generator === 'claude') { $('#pill-llm').textContent = 'LLM: Claude (artifact)'; $('#pill-llm').className = 'pill ok'; }
   // settings persistence
   const fields = ['mode', 'backend', 'k', 'pk', 'budget', 'maxnew', 'temp', 'llm', 'sb-url', 'sb-key', 'layout', 'colorby'];
   const defaults = { 'sb-url': CONFIG.supabaseUrl, 'sb-key': CONFIG.supabaseAnonKey, backend: CONFIG.supabaseUrl ? 'supabase' : 'local' };
@@ -564,7 +611,7 @@ async function boot() {
   $('#ask').onclick = ask;
   $('#q').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(); } });
   $('#stop').onclick = () => S.worker.postMessage({ type: 'stop' });
-  $('#load').onclick = async () => { try { $('#load').disabled = true; await ensureEmbedder(); await ensureLLM(); } catch (e) { setStatus(e.message); } finally { $('#load').disabled = false; } };
+  $('#load').onclick = async () => { try { $('#load').disabled = true; await ensureEmbedder(); if (CONFIG.generator !== 'claude') await ensureLLM(); } catch (e) { setStatus(e.message); } finally { $('#load').disabled = false; } };
   $('#llm').addEventListener('change', () => { if (S.llmReady !== $('#llm').value) { $('#pill-llm').className = 'pill'; $('#pill-llm').textContent = 'LLM: idle'; } });
   ['#layout', '#colorby', '#show-parents', '#show-tokens'].forEach((s) => $(s).addEventListener('change', updateSpace));
   document.querySelectorAll('.tab').forEach((t) => (t.onclick = () => activateTab(t.dataset.tab)));
@@ -573,7 +620,7 @@ async function boot() {
     const gt = e.target.closest('.gt'); if (gt) { S.selStep = null; showStep(+gt.dataset.step); S.selStep = +gt.dataset.step; }
   });
 
-  S.index = await GitaIndex.load('./data/');
+  S.index = await GitaIndex.load('./data/', CONFIG.bundle?.embeddings || 'embeddings.json');
   S.dims = await fetch('./data/dimensions.json').then((r) => r.json());
   for (const v of S.index.verses) { v.pca = S.dims.scores[v.idx].slice(0, 3); S.index.byId.get(v.id).pca = v.pca; }
   for (const s of S.index.sections) {

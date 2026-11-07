@@ -20,4 +20,10 @@ export const CONFIG = {
   modelHost: null,
   // Optional override for where ONNX Runtime fetches its .wasm files (default: jsDelivr).
   wasmPaths: null,
+  // Who writes the answer: 'cpu' = the in-browser LLM above (shows per-token probabilities);
+  // 'claude' = Claude through the artifact `sample` capability (used by the published artifact,
+  // whose host blocks model downloads). The artifact build script sets these two fields.
+  generator: 'cpu',
+  // Artifact build only: model files + ONNX Runtime wasm shipped inside the page.
+  bundle: null,
 };

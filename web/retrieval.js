@@ -6,11 +6,11 @@
 export const W_BEST = 0.6, W_PARENT = 0.25, W_DENSITY = 0.15;
 
 export class GitaIndex {
-  static async load(base = './data/') {
+  static async load(base = './data/', embeddingsFile = 'embeddings.json') {
     // embeddings.json holds the three float32 matrices as base64 (row-major, `dim` columns)
     const [ix, emb] = await Promise.all([
       fetch(base + 'gita_index.json').then((r) => r.json()),
-      fetch(base + 'embeddings.json').then((r) => r.json()),
+      fetch(base + embeddingsFile).then((r) => r.json()),
     ]);
     const f32 = (b64) => { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Float32Array(u.buffer); };
     return new GitaIndex(ix, f32(emb.verses), f32(emb.sections), f32(emb.themes));

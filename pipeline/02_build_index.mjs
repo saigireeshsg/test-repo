@@ -7,7 +7,7 @@
 //     -> theme index    (primary theme from the curated section + embedding similarity to every theme)
 //     -> 3-D layouts    (PCA, exactly reproducible for queries; UMAP for neighbourhood structure)
 //
-// Output: web/data/{gita_index.json, verse_embeddings.f32, section_embeddings.f32, theme_embeddings.f32}
+// Output: web/data/{gita_index.json, embeddings.json (base64), *.f32 (raw float32, used by step 3)}
 //
 // Run:  MODEL_DIR=/path/to/models node pipeline/02_build_index.mjs
 //       (MODEL_DIR must contain Xenova/all-MiniLM-L6-v2/{config.json,tokenizer.json,tokenizer_config.json,onnx/model.onnx};
@@ -164,6 +164,9 @@ sections.forEach((s) => {
 writeFileSync(join(OUT, 'verse_embeddings.f32'), Buffer.from(childE.buffer));
 writeFileSync(join(OUT, 'section_embeddings.f32'), Buffer.from(sectionE.buffer));
 writeFileSync(join(OUT, 'theme_embeddings.f32'), Buffer.from(themeE.buffer));
+// same matrices as base64 JSON (what the browser loads; static hosts that refuse binary files still serve JSON)
+const b64 = (a) => Buffer.from(a.buffer, a.byteOffset, a.byteLength).toString('base64');
+writeFileSync(join(OUT, 'embeddings.json'), JSON.stringify({ dim: DIM, dtype: 'float32', verses: b64(childE), sections: b64(sectionE), themes: b64(themeE) }));
 const index = {
   model: MODEL_ID,
   dim: DIM,

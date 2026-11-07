@@ -65,7 +65,7 @@ export class GitaIndex {
 export async function supabaseRpc(cfg, fn, args) {
   const res = await fetch(`${cfg.url.replace(/\/$/, '')}/rest/v1/rpc/${fn}`, {
     method: 'POST',
-    headers: { apikey: cfg.anonKey, Authorization: `Bearer ${cfg.anonKey}`, 'Content-Type': 'application/json' },
+    headers: { apikey: cfg.anonKey, ...(cfg.anonKey.startsWith('eyJ') ? { Authorization: `Bearer ${cfg.anonKey}` } : {}), 'Content-Type': 'application/json' },
     body: JSON.stringify(args),
   });
   if (!res.ok) throw new Error(`Supabase ${fn}: ${res.status} ${await res.text()}`);

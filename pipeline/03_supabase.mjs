@@ -2,7 +2,7 @@
 //
 //   node pipeline/03_supabase.mjs --sql      writes supabase/seed.sql (used by `supabase db reset`, or paste into the SQL editor)
 //   node pipeline/03_supabase.mjs --upload   upserts rows over the REST API
-//        needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the environment (service role: writes bypass RLS)
+//        needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (a secret key sb_secret_... or the legacy service_role JWT; writes bypass RLS)
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,7 +60,12 @@ if (process.argv.includes('--sql')) {
     for (let i = 0; i < rs.length; i += 100) {
       const res = await fetch(`${url}/rest/v1/${table}`, {
         method: 'POST',
-        headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal' },
+        headers: {
+          apikey: key,
+          // legacy JWT keys also go in Authorization; new sb_secret_/sb_publishable_ keys must not
+          ...(key.startsWith('eyJ') ? { Authorization: `Bearer ${key}` } : {}),
+          'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=minimal',
+        },
         body: JSON.stringify(rs.slice(i, i + 100)),
       });
       if (!res.ok) throw new Error(`${table}: ${res.status} ${await res.text()}`);

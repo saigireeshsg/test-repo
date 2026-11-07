@@ -527,6 +527,17 @@ function drawParcoords() {
     labelfont: { size: 11, color: css('--ink') }, tickfont: { size: 9, color: css('--muted') }, rangefont: { size: 1, color: 'rgba(0,0,0,0)' },
   }], { margin: { l: 60, r: 60, t: 40, b: 30 }, paper_bgcolor: 'rgba(0,0,0,0)', font: { color: css('--ink') } }, { displayModeBar: false, responsive: true });
 }
+// Can this page reach the hosts the models come from? Shown as a pill so a blocked host is obvious.
+async function checkNetwork() {
+  const pill = $('#pill-net');
+  const probe = async (url) => { try { const r = await fetch(url, { method: 'GET', cache: 'no-store' }); return r.ok; } catch { return false; } };
+  const hub = CONFIG.modelHost ? CONFIG.modelHost.replace(/\/$/, '') + '/' + CONFIG.embedModel + '/config.json'
+    : `https://huggingface.co/${CONFIG.embedModel}/resolve/main/config.json`;
+  const [h, c] = await Promise.all([probe(hub), probe(CONFIG.transformersUrl)]);
+  pill.className = 'pill ' + (h && c ? 'ok' : 'busy');
+  pill.textContent = h && c ? 'model hub: reachable' : `blocked: ${[!h && new URL(hub).host, !c && 'cdn.jsdelivr.net'].filter(Boolean).join(', ')}`;
+  if (!(h && c)) setStatus('This page cannot download the models (see the red pill). Run it with `npm run serve` locally, or host it where those sites are allowed.');
+}
 function activateTab(name) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tabpane').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + name));
@@ -577,6 +588,7 @@ async function boot() {
     if (String(id).startsWith('sec:')) { const s = S.index.sectionById.get(id.slice(4)); showVerse(s.verse_ids[0]); } else showVerse(id);
   });
   startWorker();
+  checkNetwork();
   await waitFor((m) => m.type === 'inited');
   document.body.dataset.ready = '1';
 }

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gita RAG Lab</title>
+  <meta name="description" content="Bhagavad Gita parent-child RAG: 700 shlokas indexed by theme, embedded in pgvector, answered by a CPU-only LLM in your browser with every step visualised." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Serif+Devanagari:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@3.1.0/plotly.min.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="om" aria-hidden="true">ॐ</span>
+      <div>
+        <h1>Gita RAG Lab</h1>
+        <p class="sub">700 shlokas · 18 chapters · 78 thematic passages · retrieval-augmented generation on your CPU</p>
+      </div>
+    </div>
+    <div class="pills">
+      <span class="pill" id="pill-store">vector store: …</span>
+      <span class="pill" id="pill-embed">embedder: idle</span>
+      <span class="pill" id="pill-llm">LLM: idle</span>
+      <span class="pill" id="pill-cpu">CPU: …</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ============================================================ left: ask + pipeline -->
+    <section class="col col-left">
+      <div class="card ask">
+        <label for="q" class="lbl">Ask the Gita</label>
+        <textarea id="q" rows="2" placeholder="e.g. How do I deal with anger?">Should I care about the results of my work?</textarea>
+        <div class="examples" id="examples"></div>
+        <div class="row">
+          <button id="ask" class="primary">Ask</button>
+          <button id="stop" class="ghost" disabled>Stop</button>
+          <button id="load" class="ghost">Preload models</button>
+          <span class="muted small" id="ask-status"></span>
+        </div>
+        <details class="settings">
+          <summary>Settings</summary>
+          <div class="grid2">
+            <label>Retrieval
+              <select id="mode">
+                <option value="parent">Parent-child (small-to-big)</option>
+                <option value="child">Child chunks only</option>
+              </select>
+            </label>
+            <label>Vector store
+              <select id="backend">
+                <option value="local">In-browser (exact)</option>
+                <option value="supabase">Supabase pgvector</option>
+              </select>
+            </label>
+            <label>Child hits (k) <input id="k" type="number" min="3" max="30" value="12" /></label>
+            <label>Parents <input id="pk" type="number" min="1" max="6" value="3" /></label>
+            <label>Context budget (tokens) <input id="budget" type="number" min="200" max="3000" step="100" value="700" /></label>
+            <label>Max new tokens <input id="maxnew" type="number" min="16" max="512" step="16" value="160" /></label>
+            <label>Temperature <input id="temp" type="number" min="0" max="1.5" step="0.1" value="0" /></label>
+            <label>LLM <select id="llm"></select></label>
+            <label class="wide">Supabase URL <input id="sb-url" placeholder="https://xyz.supabase.co" /></label>
+            <label class="wide">Supabase anon key <input id="sb-key" placeholder="eyJ…" /></label>
+          </div>
+          <p class="muted small">Temperature 0 = greedy decoding: the highest-probability token is always chosen.</p>
+        </details>
+      </div>
+
+      <ol class="pipeline" id="pipeline">
+        <li class="stage" data-stage="tokenize">
+          <div class="stage-h"><span class="num">1</span><h3>Tokenise the question</h3><span class="t"></span></div>
+          <p class="hint">WordPiece tokens fed to the embedding model (all-MiniLM-L6-v2).</p>
+          <div class="body" id="s-tokenize"></div>
+        </li>
+        <li class="stage" data-stage="embed">
+          <div class="stage-h"><span class="num">2</span><h3>Embed → 384-d vector</h3><span class="t"></span></div>
+          <p class="hint">6 transformer layers give one vector per token; mean pooling + L2 normalisation gives the query vector.</p>
+          <div class="body" id="s-embed"></div>
+        </li>
+        <li class="stage" data-stage="search">
+          <div class="stage-h"><span class="num">3</span><h3>Vector search (child chunks)</h3><span class="t"></span></div>
+          <p class="hint">Cosine similarity against 700 verse vectors.</p>
+          <div class="body" id="s-search"></div>
+        </li>
+        <li class="stage" data-stage="parent">
+          <div class="stage-h"><span class="num">4</span><h3>Parent expansion</h3><span class="t"></span></div>
+          <p class="hint">Hits are grouped by their passage; score = 0.60·best child + 0.25·passage vector + 0.15·hit density.</p>
+          <div class="body" id="s-parent"></div>
+        </li>
+        <li class="stage" data-stage="prompt">
+          <div class="stage-h"><span class="num">5</span><h3>Assemble the prompt</h3><span class="t"></span></div>
+          <p class="hint">Retrieved passages + question, inside the model's chat template.</p>
+          <div class="body" id="s-prompt"></div>
+        </li>
+        <li class="stage" data-stage="generate">
+          <div class="stage-h"><span class="num">6</span><h3>Generate token by token (CPU)</h3><span class="t"></span></div>
+          <p class="hint">Each token is coloured by the probability the model gave it. Click a token to see its alternatives.</p>
+          <div class="body" id="s-generate"><div class="answer" id="answer"></div><div class="gen-stats muted small" id="gen-stats"></div></div>
+        </li>
+      </ol>
+    </section>
+
+    <!-- ============================================================ right: visualisations -->
+    <section class="col col-right">
+      <div class="tabs" role="tablist">
+        <button role="tab" class="tab active" data-tab="space">Embedding space</button>
+        <button role="tab" class="tab" data-tab="index">Thematic index</button>
+        <button role="tab" class="tab" data-tab="about">How it works</button>
+      </div>
+
+      <div class="tabpane active" id="tab-space">
+        <div class="card">
+          <div class="row controls">
+            <label>Layout
+              <select id="layout"><option value="umap">UMAP 3-D</option><option value="pca">PCA 3-D</option></select>
+            </label>
+            <label>Colour by
+              <select id="colorby">
+                <option value="theme">primary theme</option>
+                <option value="chapter">chapter</option>
+                <option value="hexad">hexad (karma / bhakti / jnana)</option>
+                <option value="speaker">speaker</option>
+              </select>
+            </label>
+            <label class="chk"><input type="checkbox" id="show-parents" checked /> passages</label>
+            <span class="muted small" id="space-note"></span>
+          </div>
+          <div id="space" class="plot3d"></div>
+          <div id="legend" class="legend"></div>
+        </div>
+        <div class="card">
+          <div class="row"><h3 class="h">Next-token distribution</h3><span class="muted small" id="nt-label">step —</span></div>
+          <div id="nexttok" class="plot2d"></div>
+          <div id="timeline" class="plot2d short"></div>
+        </div>
+        <div class="card" id="verse-card" hidden></div>
+      </div>
+
+      <div class="tabpane" id="tab-index">
+        <div class="card"><div id="index-view"></div></div>
+      </div>
+
+      <div class="tabpane" id="tab-about">
+        <div class="card prose" id="about"></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

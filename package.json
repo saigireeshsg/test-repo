@@ -7,9 +7,10 @@
   "scripts": {
     "build:verses": "python3 pipeline/01_build_verses.py",
     "build:index": "node pipeline/02_build_index.mjs",
+    "build:dims": "python3 pipeline/04_dimensions.py",
     "build:seed": "node pipeline/03_supabase.mjs --sql",
     "upload:supabase": "node pipeline/03_supabase.mjs --upload",
-    "build": "npm run build:verses && npm run build:index && npm run build:seed",
+    "build": "npm run build:verses && npm run build:index && npm run build:dims && npm run build:seed",
     "serve": "npx --yes http-server@14.1.1 web -p 8080 -c-1"
   },
   "dependencies": {

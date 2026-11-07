@@ -29,7 +29,7 @@ const SPEAKER_COLORS = { Krishna: '#2563eb', Arjuna: '#c2410c', Sanjaya: '#05966
 const chapterColor = (c) => `hsl(${((c - 1) * 360) / 18}, 65%, 50%)`;
 
 // ------------------------------------------------------------------ state
-const S = { index: null, worker: null, embedReady: false, llmReady: null, busy: false, run: null, selStep: null };
+const S = { dims: null, index: null, worker: null, embedReady: false, llmReady: null, busy: false, run: null, selStep: null };
 
 // ------------------------------------------------------------------ worker plumbing
 const listeners = new Set();
@@ -129,6 +129,8 @@ async function ask() {
     S.worker.postMessage({ type: 'embed', text: question });
     const e = await waitFor((m) => m.type === 'embedding');
     run.vector = new Float32Array(e.vector);
+    run.tokens = e.tokens;
+    run.tokenVecs = e.tokenVecs.map((v) => { const n = Math.hypot(...v) || 1; return Float32Array.from(v, (x) => x / n); });
     renderTokens(e); stage('tokenize', 'done', `${e.ids.length} tokens`);
     renderEmbedding(e); stage('embed', 'done', ms(e.ms));
 
@@ -198,6 +200,9 @@ function renderEmbedding(e) {
   const lab = (t) => Object.assign(document.createElement('div'), { className: 'muted small', textContent: t });
   el.append(lab(`per-token vectors from the last layer (${e.tokenVecs.length} × 384):`), heatmap(e.tokenVecs, { height: 6 }));
   el.append(lab('mean-pooled + normalised query vector (384 dims; saffron +, indigo −):'), heatmap([e.vector], { height: 34 }));
+  const tm = tokenMeaning(e.tokens, e.tokenVecs);
+  el.insertAdjacentHTML('beforeend', `<div class="muted small" style="margin-top:8px">what each token vector points to (before pooling):</div>
+    <div class="tokmap">${tm.map((t) => `<span class="tk">${esc(t.token)}</span><span>${esc(t.theme)} · nearest <span class="vchip" data-v="${t.verse}">${t.verse}</span></span><span class="score">${fmt(t.sim)}</span>`).join('')}</div>`);
   const th = S.index.themeScores(new Float32Array(e.vector)).slice(0, 5);
   const max = th[0].score;
   el.insertAdjacentHTML('beforeend', `<div class="muted small" style="margin-top:8px">closest themes (cosine to theme descriptions):</div>
@@ -301,6 +306,30 @@ function linkCitations() {
   if (cites.length) $('#gen-stats').insertAdjacentHTML('beforeend', `<div style="margin-top:6px">cited: ${cites.map((c) => `<span class="vchip on" data-v="${c}">${c}</span>`).join(' ')}</div>`);
 }
 
+// ------------------------------------------------------------------ dimensions helpers
+function projDims(q, k = 3) {
+  const D = S.dims; const out = [];
+  for (let c = 0; c < k; c++) { let s = 0; const comp = D.components[c]; for (let d = 0; d < comp.length; d++) s += comp[d] * (q[d] - D.mean[d]); out.push(s); }
+  return out;
+}
+function tokenMeaning(tokens, vecs) {
+  const ix = S.index;
+  return tokens.map((token, i) => {
+    const raw = vecs[i]; const n = Math.hypot(...raw) || 1; const q = Float32Array.from(raw, (x) => x / n);
+    let best = -2, bi = 0;
+    for (const v of ix.verses) { const s = ix.dotRow(ix.VE, v.idx, q); if (s > best) { best = s; bi = v.idx; } }
+    const th = ix.themeScores(q)[0];
+    return { token, verse: ix.verses[bi].id, sim: best, theme: th.name, q };
+  });
+}
+// place an arbitrary vector in the UMAP layout: similarity-weighted centroid of its 5 nearest verses
+function umapPlace(q) {
+  const ix = S.index;
+  const top = ix.verses.map((v) => [v, ix.dotRow(ix.VE, v.idx, q)]).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const w = top.map(([, s]) => Math.max(1e-3, s) ** 4); const W = w.reduce((a, b) => a + b, 0);
+  return [0, 1, 2].map((k) => top.reduce((s, [v], i) => s + w[i] * v.umap[k], 0) / W);
+}
+
 // ------------------------------------------------------------------ 3-D embedding space
 function colorFor(v, by) {
   if (by === 'theme') return THEME_COLORS[S.index.themes.findIndex((t) => t.id === v.primary_theme)];
@@ -355,24 +384,48 @@ function updateSpace() {
     });
   }
   if (active && run.vector) {
-    const q = lay === 'pca' ? ix.projectPCA(run.vector) : ix.projectUMAP(run.retrieval.hits);
+    const q = lay === 'pca' ? projDims(run.vector) : ix.projectUMAP(run.retrieval.hits);
     const lx = [], ly = [], lz = [];
     for (const h of run.retrieval.hits) { const p = P(ix.byId.get(h.id)); lx.push(q[0], p[0], null); ly.push(q[1], p[1], null); lz.push(q[2], p[2], null); }
     traces.push({ type: 'scatter3d', mode: 'lines', name: 'query → hits', x: lx, y: ly, z: lz, line: { color: css('--accent'), width: 3 }, hoverinfo: 'skip', opacity: 0.6 });
     traces.push({ type: 'scatter3d', mode: 'markers+text', name: 'your question', x: [q[0]], y: [q[1]], z: [q[2]], text: ['Q'], textposition: 'top center',
       marker: { size: 10, color: css('--accent'), symbol: 'diamond-open', line: { width: 3, color: css('--accent') } }, hovertemplate: esc(run.question) + '<extra>query</extra>' });
+    if ($('#show-tokens').checked && run.tokenVecs) {
+      const tm = tokenMeaning(run.tokens, run.tokenVecs);
+      const pts = tm.map((t) => (lay === 'pca' ? projDims(t.q) : umapPlace(t.q)));
+      const special = run.tokens.map((t) => /^\[(CLS|SEP)\]$/.test(t));
+      const lx = [], ly = [], lz = [];
+      pts.forEach((p) => { lx.push(p[0], q[0], null); ly.push(p[1], q[1], null); lz.push(p[2], q[2], null); });
+      traces.push({ type: 'scatter3d', mode: 'lines', name: 'tokens → question (mean pooling)', x: lx, y: ly, z: lz, line: { color: css('--accent-2'), width: 2, dash: 'dot' }, hoverinfo: 'skip' });
+      traces.push({
+        type: 'scatter3d', mode: 'markers+text', name: 'question tokens', x: pts.map((p) => p[0]), y: pts.map((p) => p[1]), z: pts.map((p) => p[2]),
+        text: run.tokens, textposition: 'top center', textfont: { size: 12, color: css('--accent-2'), family: 'JetBrains Mono, monospace' },
+        marker: { size: 5, color: special.map((sp) => (sp ? 'rgba(128,128,128,.6)' : css('--accent-2'))) },
+        customdata: tm.map((t) => t.verse),
+        hovertext: tm.map((t) => `token <b>${esc(t.token)}</b><br>points toward: ${esc(t.theme)}<br>nearest verse ${t.verse} (cos ${t.sim.toFixed(3)})`),
+        hovertemplate: '%{hovertext}<extra>token</extra>',
+      });
+      // arrow heads: cones 75% of the way from each token to the question
+      const span = Math.max(...[0, 1, 2].map((k) => Math.max(...pts.map((p) => p[k]), q[k]) - Math.min(...pts.map((p) => p[k]), q[k]))) || 1;
+      const dir = pts.map((p) => { const d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]]; const n = Math.hypot(...d) || 1; return d.map((x) => x / n); });
+      const mid = pts.map((p) => [0, 1, 2].map((k) => p[k] + 0.75 * (q[k] - p[k])));
+      traces.push({ type: 'cone', name: 'pooling direction', x: mid.map((m) => m[0]), y: mid.map((m) => m[1]), z: mid.map((m) => m[2]),
+        u: dir.map((d) => d[0]), v: dir.map((d) => d[1]), w: dir.map((d) => d[2]), anchor: 'center', sizemode: 'absolute', sizeref: span * 0.05,
+        colorscale: [[0, css('--accent-2')], [1, css('--accent-2')]], showscale: false, hoverinfo: 'skip', showlegend: false });
+    }
+    const D = S.dims;
     $('#space-note').textContent = lay === 'pca'
-      ? `query projected exactly with the PCA basis (3 PCs explain ${(100 * ix.pca.explained_variance_ratio.reduce((a, b) => a + b, 0)).toFixed(0)}% of variance)`
+      ? `PC1 ${(100 * D.explained_variance_ratio[0]).toFixed(0)}%: ${D.axes[0].label} · PC2: ${D.axes[1].label} · PC3: ${D.axes[2].label} — the question and its tokens are projected exactly`
       : 'query placed at the similarity-weighted centroid of its top-5 neighbours';
   } else {
-    $('#space-note').textContent = lay === 'pca' ? '700 shlokas, 384-d → 3-D by PCA' : '700 shlokas, 384-d → 3-D by UMAP (cosine, 15 neighbours)';
+    $('#space-note').textContent = lay === 'pca' ? `700 shlokas, 384-d → 3-D by PCA (these 3 axes hold ${(100 * S.dims.cumulative[2]).toFixed(0)}% of the variance; see the Dimensions tab) · PC1: ${S.dims.axes[0].label}` : '700 shlokas, 384-d → 3-D by UMAP (cosine, 15 neighbours)';
   }
   const ink = css('--ink'), grid = css('--line');
   const ax = (t) => ({ title: { text: t }, showspikes: false, gridcolor: grid, zerolinecolor: grid, color: css('--muted'), showticklabels: false });
   Plotly.react('space', traces, {
     margin: { l: 0, r: 0, t: 0, b: 0 }, paper_bgcolor: 'rgba(0,0,0,0)', showlegend: true,
     legend: { x: 0, y: 1, font: { size: 11, color: ink }, bgcolor: 'rgba(0,0,0,0)' }, font: { color: ink },
-    scene: { xaxis: ax(lay === 'pca' ? 'PC1' : 'U1'), yaxis: ax(lay === 'pca' ? 'PC2' : 'U2'), zaxis: ax(lay === 'pca' ? 'PC3' : 'U3'), bgcolor: 'rgba(0,0,0,0)' },
+    scene: { xaxis: ax(lay === 'pca' ? 'PC1 ' + S.dims.axes[0].label.split('  ↔  ').map((x) => x.split(' (')[0]).join(' ↔ ') : 'U1'), yaxis: ax(lay === 'pca' ? 'PC2 ' + S.dims.axes[1].label.split('  ↔  ').map((x) => x.split(' (')[0]).join(' ↔ ') : 'U2'), zaxis: ax(lay === 'pca' ? 'PC3' : 'U3'), bgcolor: 'rgba(0,0,0,0)' },
     uirevision: lay,
   }, { displaylogo: false, responsive: true });
   legend(by);
@@ -434,10 +487,51 @@ function renderAbout() {
   <h3>The 3-D space</h3>
   <p>PCA is a linear map, so your question is projected exactly. UMAP preserves neighbourhoods better but has no exact transform here, so the question is placed at the similarity-weighted centroid of its nearest verses. Distances in 3-D are only an approximation of cosine distance in 384-d.</p>`;
 }
+function renderDims() {
+  const D = S.dims;
+  $('#dims-summary').innerHTML = `<h3 style="margin-top:0">How many dimensions does meaning need?</h3>
+    <div><span class="stat"><b>${D.dim}</b>dimensions in each embedding</span><span class="stat"><b>≈${Math.round(D.participation_ratio)}</b>effectively used by the 700 verses</span>
+    <span class="stat"><b>${D.components_for['50']}</b>for 50 % of the variation</span><span class="stat"><b>${D.components_for['90']}</b>for 90 %</span><span class="stat"><b>3</b>what a human can see: ${(100 * D.cumulative[2]).toFixed(0)} %</span></div>
+    <p>The embedding model writes every text as ${D.dim} numbers, but the verses do not use all directions equally. The <b>participation ratio</b> (an effective-dimensionality measure) says the Gita's meaning-space behaves like about <b>${Math.round(D.participation_ratio)} independent dimensions</b>. People can only look at 3 at a time, so the 3-D plot is a shadow showing ${(100 * D.cumulative[2]).toFixed(0)} % of the structure. Use the parallel-coordinates plot below to see 10 dimensions at once (${(100 * D.cumulative[9]).toFixed(0)} %).</p>
+    <p class="muted small">No single dimension of a learned embedding is human-meaningful on its own, but principal directions often are: each axis below is labelled by the themes and verses at its two poles.</p>`;
+  const n = 80, xs = [...Array(n).keys()].map((i) => i + 1);
+  Plotly.react('scree', [
+    { type: 'bar', x: xs, y: D.explained_variance_ratio.slice(0, n), name: 'variance per dimension', marker: { color: css('--accent-2') } },
+    { type: 'scatter', mode: 'lines', x: xs, y: D.cumulative.slice(0, n), name: 'cumulative', yaxis: 'y2', line: { color: css('--accent') } },
+  ], {
+    margin: { l: 40, r: 40, t: 6, b: 30 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: { color: css('--ink'), size: 11 },
+    legend: { orientation: 'h', y: 1.15 }, xaxis: { title: { text: 'principal component' }, gridcolor: css('--line') },
+    yaxis: { tickformat: '.0%', gridcolor: css('--line') }, yaxis2: { overlaying: 'y', side: 'right', range: [0, 1], tickformat: '.0%', showgrid: false },
+    shapes: [3, D.components_for['50'], D.components_for['80']].map((x) => ({ type: 'line', x0: x + 0.5, x1: x + 0.5, y0: 0, y1: 1, yref: 'paper', line: { dash: 'dot', color: css('--muted'), width: 1 } })),
+    annotations: [[3, '3-D view'], [D.components_for['50'], '50 %'], [D.components_for['80'], '80 %']].map(([x, t]) => ({ x: x + 0.5, y: 1, yref: 'paper', text: t, showarrow: false, yanchor: 'bottom', font: { size: 10, color: css('--muted') } })),
+  }, { displayModeBar: false, responsive: true });
+  $('#axes-table').innerHTML = `<table class="axes"><tr><th>axis</th><th>+ pole (themes · verses)</th><th>− pole (themes · verses)</th></tr>${D.axes.map((a) => `<tr><td class="pc">PC${a.pc}<br><span class="muted">${(100 * a.explained).toFixed(1)}%</span></td>
+    <td>${a.positive_themes.map(esc).join(', ')}<div class="vchips">${a.positive_verses.map((id) => `<span class="vchip" data-v="${id}">${id.replace('BG ', '')}</span>`).join('')}</div></td>
+    <td>${a.negative_themes.map(esc).join(', ')}<div class="vchips">${a.negative_verses.map((id) => `<span class="vchip" data-v="${id}">${id.replace('BG ', '')}</span>`).join('')}</div></td></tr>`).join('')}</table>`;
+  drawParcoords();
+}
+function drawParcoords() {
+  const D = S.dims, ix = S.index, k = D.k;
+  const hexIdx = { karma: 0, bhakti: 1, jnana: 2 };
+  const cols = ix.verses.map((v) => hexIdx[v.hexad]);
+  const rows = ix.verses.map((v) => D.scores[v.idx]);
+  if (S.run?.vector) { rows.push(projDims(S.run.vector, k)); cols.push(3); }
+  const dims = [...Array(k).keys()].map((c) => {
+    const vals = rows.map((r) => r[c]);
+    const a = D.axes[c];
+    return { label: `PC${c + 1}`, values: vals, range: [Math.min(...vals), Math.max(...vals)], tickvals: [Math.min(...vals), Math.max(...vals)], ticktext: [a.negative_themes[0].split(' (')[0].split(/[ ,;]/)[0].slice(0, 10) + ' −', a.positive_themes[0].split(' (')[0].split(/[ ,;]/)[0].slice(0, 10) + ' +'] };
+  });
+  Plotly.react('parcoords', [{
+    type: 'parcoords', dimensions: dims,
+    line: { color: cols, cmin: 0, cmax: 3, colorscale: [[0, HEXAD_COLORS.karma], [0.33, HEXAD_COLORS.karma], [0.34, HEXAD_COLORS.bhakti], [0.66, HEXAD_COLORS.bhakti], [0.67, HEXAD_COLORS.jnana], [0.99, HEXAD_COLORS.jnana], [1, css('--ink')]] },
+    labelfont: { size: 11, color: css('--ink') }, tickfont: { size: 9, color: css('--muted') }, rangefont: { size: 1, color: 'rgba(0,0,0,0)' },
+  }], { margin: { l: 60, r: 60, t: 40, b: 30 }, paper_bgcolor: 'rgba(0,0,0,0)', font: { color: css('--ink') } }, { displayModeBar: false, responsive: true });
+}
 function activateTab(name) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.tabpane').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + name));
   if (name === 'space') { Plotly.Plots.resize('space'); }
+  if (name === 'dims') { drawParcoords(); Plotly.Plots.resize('scree'); }
 }
 
 // ------------------------------------------------------------------ boot
@@ -461,7 +555,7 @@ async function boot() {
   $('#stop').onclick = () => S.worker.postMessage({ type: 'stop' });
   $('#load').onclick = async () => { try { $('#load').disabled = true; await ensureEmbedder(); await ensureLLM(); } catch (e) { setStatus(e.message); } finally { $('#load').disabled = false; } };
   $('#llm').addEventListener('change', () => { if (S.llmReady !== $('#llm').value) { $('#pill-llm').className = 'pill'; $('#pill-llm').textContent = 'LLM: idle'; } });
-  ['#layout', '#colorby', '#show-parents'].forEach((s) => $(s).addEventListener('change', updateSpace));
+  ['#layout', '#colorby', '#show-parents', '#show-tokens'].forEach((s) => $(s).addEventListener('change', updateSpace));
   document.querySelectorAll('.tab').forEach((t) => (t.onclick = () => activateTab(t.dataset.tab)));
   document.body.addEventListener('click', (e) => {
     const v = e.target.closest('[data-v]'); if (v) return showVerse(v.dataset.v);
@@ -469,8 +563,15 @@ async function boot() {
   });
 
   S.index = await GitaIndex.load('./data/');
+  S.dims = await fetch('./data/dimensions.json').then((r) => r.json());
+  for (const v of S.index.verses) { v.pca = S.dims.scores[v.idx].slice(0, 3); S.index.byId.get(v.id).pca = v.pca; }
+  for (const s of S.index.sections) {
+    const kids = s.verse_ids.map((id) => S.index.byId.get(id));
+    s.pca = [0, 1, 2].map((k) => kids.reduce((a, v) => a + v.pca[k], 0) / kids.length);
+    S.index.sectionById.get(s.id).pca = s.pca;
+  }
   window.gitaIndex = S.index;
-  renderIndex(); renderAbout(); updateSpace();
+  renderIndex(); renderAbout(); renderDims(); updateSpace();
   document.getElementById('space').on('plotly_click', (ev) => {
     const id = ev.points?.[0]?.customdata; if (!id) return;
     if (String(id).startsWith('sec:')) { const s = S.index.sectionById.get(id.slice(4)); showVerse(s.verse_ids[0]); } else showVerse(id);

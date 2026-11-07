@@ -106,6 +106,7 @@
     <section class="col col-right">
       <div class="tabs" role="tablist">
         <button role="tab" class="tab active" data-tab="space">Embedding space</button>
+        <button role="tab" class="tab" data-tab="dims">Dimensions</button>
         <button role="tab" class="tab" data-tab="index">Thematic index</button>
         <button role="tab" class="tab" data-tab="about">How it works</button>
       </div>
@@ -125,6 +126,7 @@
               </select>
             </label>
             <label class="chk"><input type="checkbox" id="show-parents" checked /> passages</label>
+            <label class="chk"><input type="checkbox" id="show-tokens" checked /> question tokens</label>
             <span class="muted small" id="space-note"></span>
           </div>
           <div id="space" class="plot3d"></div>
@@ -136,6 +138,15 @@
           <div id="timeline" class="plot2d short"></div>
         </div>
         <div class="card" id="verse-card" hidden></div>
+      </div>
+
+      <div class="tabpane" id="tab-dims">
+        <div class="card prose" id="dims-summary"></div>
+        <div class="card"><h3 class="h">Scree: how much meaning each dimension carries</h3><div id="scree" class="plot2d"></div></div>
+        <div class="card"><h3 class="h">All 700 verses across the top 10 dimensions</h3>
+          <p class="muted small">Each line is one shloka; each vertical axis is one principal direction of meaning. Drag on an axis to filter. After you ask, your question is the thick line.</p>
+          <div id="parcoords" class="plotpc"></div></div>
+        <div class="card"><h3 class="h">What each axis means</h3><div id="axes-table"></div></div>
       </div>
 
       <div class="tabpane" id="tab-index">

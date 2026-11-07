@@ -138,3 +138,12 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; max-height: 220px; o
 .err { color: #dc2626; font-size: 12.5px; white-space: pre-wrap; }
 .progress { height: 4px; background: var(--chip); border-radius: 2px; overflow: hidden; margin-top: 6px; }
 .progress div { height: 100%; background: var(--warn); width: 0; transition: width .2s; }
+
+.plotpc { width: 100%; height: 420px; }
+table.axes { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.axes th, table.axes td { text-align: left; padding: 6px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+table.axes td.pc { font: 600 12px var(--mono); white-space: nowrap; }
+.tokmap { display: grid; grid-template-columns: auto 1fr auto; gap: 3px 10px; font-size: 12px; margin-top: 6px; align-items: baseline; }
+.tokmap .tk { font: 600 12px var(--mono); }
+.stat { display: inline-block; margin: 0 14px 8px 0; }
+.stat b { display: block; font-size: 22px; color: var(--accent); }

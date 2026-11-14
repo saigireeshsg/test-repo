@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse — Cardiometabolic Scan</title>
+<style>
+:root{--bg:#0d0f12;--card:#161a20;--line:#252b34;--tx:#e9edf2;--mu:#8b95a3;--red:#ff4d5e;--amb:#ffb547;--grn:#3ad49a}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font:15px/1.5 -apple-system,system-ui,Segoe UI,Roboto,sans-serif;padding:16px;max-width:520px;margin:auto}
+h1{font-size:22px;letter-spacing:-.3px}h2{font-size:17px;margin-bottom:10px}
+.sub{color:var(--mu);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:14px 0}
+.tabs{display:flex;gap:6px;margin:14px 0}
+.tab{flex:1;text-align:center;padding:9px 0;border-radius:10px;background:var(--card);border:1px solid var(--line);color:var(--mu);font-size:13px;font-weight:600}
+.tab.on{color:var(--tx);border-color:var(--red)}
+label{display:block;font-size:12px;color:var(--mu);margin:10px 0 4px}
+input,select{width:100%;background:#0f1216;border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:10px;font-size:15px}
+.row{display:flex;gap:10px}.row>div{flex:1}
+button{width:100%;border:0;border-radius:12px;padding:14px;font-size:16px;font-weight:700;background:var(--red);color:#fff;margin-top:14px}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--tx)}
+button:disabled{opacity:.4}
+.ring{width:190px;height:190px;border-radius:50%;margin:10px auto;display:grid;place-items:center;position:relative;background:conic-gradient(var(--red) var(--p,0%),#222831 0)}
+.ring>div{width:166px;height:166px;border-radius:50%;background:var(--card);display:grid;place-items:center;text-align:center}
+.big{font-size:44px;font-weight:800;line-height:1}
+canvas.wave{width:100%;height:90px;display:block;background:#0f1216;border-radius:10px;margin-top:10px}
+.msg{text-align:center;font-size:14px;margin-top:8px;min-height:21px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:#0f1216;border:1px solid var(--line);border-radius:12px;padding:12px}
+.stat b{font-size:24px;display:block}.stat span{font-size:12px;color:var(--mu)}
+.flag{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:14px}
+.flag:last-child{border:0}
+.dot{width:10px;height:10px;border-radius:50%;margin-top:6px;flex:none}
+.band{font-size:26px;font-weight:800}
+.hidden{display:none}
+.note{font-size:12px;color:var(--mu);margin-top:10px}
+ol{padding-left:18px;font-size:14px;color:var(--mu)}ol li{margin:3px 0}
+.hist{font-size:13px;display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line)}
+</style>
+</head>
+<body>
+
+<h1>❤️ Pulse</h1>
+<p class="sub">Cardiometabolic check from your phone camera + a 1-minute risk quiz.</p>
+
+<div class="tabs">
+  <div class="tab on" data-s="s1">1 · Profile</div>
+  <div class="tab" data-s="s2">2 · Scan</div>
+  <div class="tab" data-s="s3">3 · Report</div>
+</div>
+
+<!-- STEP 1 PROFILE -->
+<section id="s1">
+<div class="card">
+<h2>About you</h2>
+<div class="row"><div><label>Age</label><input id="age" type="number" inputmode="numeric" placeholder="32"></div>
+<div><label>Sex</label><select id="sex"><option value="m">Male</option><option value="f">Female</option></select></div></div>
+<div class="row"><div><label>Height (cm)</label><input id="ht" type="number" inputmode="decimal" placeholder="172"></div>
+<div><label>Weight (kg)</label><input id="wt" type="number" inputmode="decimal" placeholder="74"></div></div>
+<label>Waist at belly button (cm)</label><input id="waist" type="number" inputmode="decimal" placeholder="88">
+<label>Physical activity</label>
+<select id="act">
+<option value="0">Vigorous exercise or heavy manual work</option>
+<option value="10">Moderate exercise / active at home or work</option>
+<option value="20" selected>Mild exercise only</option>
+<option value="30">Mostly sitting, no exercise</option></select>
+<label>Parents with diabetes</label>
+<select id="fam"><option value="0">Neither</option><option value="10">One parent</option><option value="20">Both parents</option></select>
+<label>Smoking / tobacco</label>
+<select id="smk"><option value="0">Never / quit</option><option value="1">Current</option></select>
+<label>Blood pressure, if you know it (optional)</label>
+<div class="row"><div><input id="sys" type="number" inputmode="numeric" placeholder="Systolic 120"></div><div><input id="dia" type="number" inputmode="numeric" placeholder="Diastolic 80"></div></div>
+<label>Ever told your sugar was high? (incl. pregnancy)</label>
+<select id="glu"><option value="0">No</option><option value="1">Yes</option></select>
+<button id="toScan">Next → Scan pulse</button>
+</div>
+</section>
+
+<!-- STEP 2 SCAN -->
+<section id="s2" class="hidden">
+<div class="card">
+<h2>Fingertip scan</h2>
+<ol>
+<li>Cover the <b>back camera and flash</b> fully with your index fingertip.</li>
+<li>Press gently. Sit still. Breathe normally.</li>
+<li>Hold 30 seconds.</li>
+</ol>
+<div class="ring" id="ring"><div><div><div class="big" id="bpm">--</div><div class="sub" id="bpmLbl">BPM</div></div></div></div>
+<canvas class="wave" id="wave" width="600" height="180"></canvas>
+<div class="msg" id="msg">Ready</div>
+<video id="vid" playsinline muted class="hidden"></video>
+<button id="live">Start live scan</button>
+<button id="recBtn" class="ghost">Record video instead</button>
+<input id="file" type="file" accept="video/*" capture="environment" class="hidden">
+<p class="note">Live scan needs camera access. If it's blocked here, tap <b>Record video instead</b>: your camera opens — turn on the flash, cover lens with finger, record 35 seconds, then use the clip.</p>
+</div>
+</section>
+
+<!-- STEP 3 REPORT -->
+<section id="s3" class="hidden">
+<div class="card" id="overall"></div>
+<div class="card"><h2>Pulse</h2><div class="stats" id="stats"></div><p class="note" id="qual"></p></div>
+<div class="card"><h2>Risk factors</h2><div id="flags"></div></div>
+<div class="card"><h2>Next steps</h2><div id="next"></div></div>
+<div class="card"><h2>History</h2><div id="hist"><p class="sub">No scans yet</p></div></div>
+<p class="note">Wellness screening only — not a diagnosis. Camera pulse readings estimate heart rate and heart-rate variability; they cannot measure blood sugar, cholesterol or blood pressure. Risk quiz uses the Indian Diabetes Risk Score (Mohan et al.) plus BMI/waist cut-offs for South Asians. See a doctor for testing.</p>
+<button class="ghost" id="again">Scan again</button>
+</section>
+
+<script>
+const $=id=>document.getElementById(id);
+const show=s=>{['s1','s2','s3'].forEach(x=>$(x).classList.toggle('hidden',x!==s));document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.dataset.s===s));scrollTo(0,0)};
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{if(t.dataset.s==='s3'&&!lastPulse)return;show(t.dataset.s)});
+
+// persist profile
+const fields=['age','sex','ht','wt','waist','act','fam','smk','sys','dia','glu'];
+try{const p=JSON.parse(localStorage.getItem('pulse_profile')||'{}');fields.forEach(f=>{if(p[f]!=null)$(f).value=p[f]})}catch(e){}
+$('toScan').onclick=()=>{
+  if(!$('age').value||!$('ht').value||!$('wt').value||!$('waist').value){$('toScan').textContent='Fill age, height, weight, waist';setTimeout(()=>$('toScan').textContent='Next → Scan pulse',1600);return}
+  try{const p={};fields.forEach(f=>p[f]=$(f).value);localStorage.setItem('pulse_profile',JSON.stringify(p))}catch(e){}
+  show('s2')};
+
+// ---------- signal capture ----------
+const DUR=30, WARM=3;
+const cv=document.createElement('canvas');cv.width=40;cv.height=40;const cx=cv.getContext('2d',{willReadFrequently:true});
+let T=[],R=[],stream=null,running=false,lastPulse=null;
+
+function frameRGB(src,w,h){
+  const s=Math.min(w,h)*0.5;cx.drawImage(src,(w-s)/2,(h-s)/2,s,s,0,0,40,40);
+  const d=cx.getImageData(0,0,40,40).data;let r=0,g=0,b=0;
+  for(let i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2]}const n=d.length/4;return[r/n,g/n,b/n]}
+const fingerOn=([r,g,b])=>r>70&&r>g*1.8&&r>b*1.8;
+
+function setMsg(m,c){$('msg').textContent=m;$('msg').style.color=c||'var(--tx)'}
+function setProg(p){$('ring').style.setProperty('--p',(p*100).toFixed(1)+'%')}
+
+function drawWave(){
+  const c=$('wave'),g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);
+  if(T.length<40)return;
+  const n=Math.min(R.length,180);const seg=R.slice(-n);
+  const m=movAvg(seg,15);const y=seg.map((v,i)=>-(v-m[i]));
+  const lo=Math.min(...y),hi=Math.max(...y),rg=(hi-lo)||1;
+  g.strokeStyle='#ff4d5e';g.lineWidth=3;g.beginPath();
+  y.forEach((v,i)=>{const X=i/(n-1)*c.width,Y=c.height-10-(v-lo)/rg*(c.height-20);i?g.lineTo(X,Y):g.moveTo(X,Y)});g.stroke()}
+
+function liveEstimate(){
+  const t0=T[T.length-1];if(t0-T[0]<8)return;
+  const r=analyze(T.filter(t=>t>t0-10),R.slice(-T.filter(t=>t>t0-10).length));
+  if(r&&r.hr)$('bpm').textContent=Math.round(r.hr)}
+
+// LIVE CAMERA
+$('live').onclick=async()=>{
+  if(running){stop();return}
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:320},height:{ideal:240},frameRate:{ideal:30}},audio:false});
+  }catch(e){setMsg('Camera blocked here → use "Record video instead"','var(--amb)');return}
+  const track=stream.getVideoTracks()[0];
+  try{await track.applyConstraints({advanced:[{torch:true}]})}catch(e){}
+  const v=$('vid');v.srcObject=stream;await v.play();
+  T=[];R=[];running=true;$('live').textContent='Stop';let start=null,lost=0;
+  const loop=()=>{
+    if(!running)return;
+    if(v.videoWidth){
+      const rgb=frameRGB(v,v.videoWidth,v.videoHeight),now=performance.now()/1000;
+      if(fingerOn(rgb)){
+        lost=0;if(start===null){start=now;T=[];R=[]}
+        T.push(now-start);R.push(rgb[0]);
+        const el=now-start;setProg(Math.min(el/(DUR+WARM),1));
+        setMsg(el<WARM?'Hold still…':'Measuring… '+Math.ceil(DUR+WARM-el)+'s','var(--grn)');
+        drawWave();if(T.length%15===0)liveEstimate();
+        if(el>=DUR+WARM){stop();finish(T,R);return}
+      }else{
+        lost++;if(lost>20&&start!==null){start=null;T=[];R=[];setProg(0)}
+        setMsg('Cover camera + flash with fingertip','var(--amb)')}
+    }
+    requestAnimationFrame(loop)};
+  loop()};
+function stop(){running=false;$('live').textContent='Start live scan';if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
+
+// RECORDED VIDEO
+$('recBtn').onclick=()=>$('file').click();
+$('file').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;stop();
+  const v=$('vid');v.srcObject=null;v.src=URL.createObjectURL(f);v.muted=true;
+  await new Promise(r=>v.onloadedmetadata=r);
+  T=[];R=[];setMsg('Analysing video…');$('bpm').textContent='--';
+  const useRVFC='requestVideoFrameCallback' in HTMLVideoElement.prototype;
+  await new Promise(async done=>{
+    const grab=(t)=>{const rgb=frameRGB(v,v.videoWidth,v.videoHeight);if(fingerOn(rgb)){T.push(t);R.push(rgb[0])}
+      setProg(v.duration?t/v.duration:0);if(T.length%10===0)drawWave()};
+    v.onended=done;
+    if(useRVFC){const cb=(n,m)=>{grab(m.mediaTime);if(!v.ended)v.requestVideoFrameCallback(cb)};v.requestVideoFrameCallback(cb);v.play().catch(done)}
+    else{v.play().catch(done);const iv=setInterval(()=>{if(v.ended){clearInterval(iv);return}grab(v.currentTime)},33)}
+  });
+  if(T.length<300||T[T.length-1]-T[0]<15){setMsg('Finger not detected long enough. Flash on, cover lens fully, 35s.','var(--red)');return}
+  // drop warm-up
+  const s=T[0]+WARM;const i0=T.findIndex(t=>t>=s);finish(T.slice(i0),R.slice(i0))};
+
+// ---------- DSP ----------
+function movAvg(a,w){const o=new Array(a.length);let s=0,q=[];for(let i=0;i<a.length;i++){q.push(a[i]);s+=a[i];if(q.length>w)s-=q.shift();o[i]=s/q.length}
+  // center the window
+  const h=Math.floor(w/2);return o.map((_,i)=>o[Math.min(i+h,o.length-1)])}
+function resample(t,x,fs){const out=[];let j=0;for(let tt=t[0];tt<=t[t.length-1];tt+=1/fs){while(j<t.length-2&&t[j+1]<tt)j++;const a=(tt-t[j])/((t[j+1]-t[j])||1);out.push(x[j]+a*(x[j+1]-x[j]))}return out}
+const med=a=>{const s=[...a].sort((p,q)=>p-q);return s.length?s[Math.floor(s.length/2)]:0};
+const mean=a=>a.reduce((p,q)=>p+q,0)/a.length;
+const sd=a=>{const m=mean(a);return Math.sqrt(mean(a.map(v=>(v-m)**2)))};
+
+function analyze(t,x){
+  if(t.length<60)return null;const fs=30;let y=resample(t,x,fs);
+  const base=movAvg(y,fs);y=y.map((v,i)=>-(v-base[i]));      // detrend + invert (blood ↑ → red ↓)
+  y=movAvg(y,4);                                               // low-pass ~7Hz
+  const amp=sd(y);if(!amp)return null;y=y.map(v=>v/amp);
+  // autocorrelation HR (40–180 bpm)
+  let best=0,lag=0;for(let L=Math.round(fs*60/180);L<=Math.round(fs*60/40);L++){let s=0;for(let i=0;i+L<y.length;i++)s+=y[i]*y[i+L];s/=y.length-L;if(s>best){best=s;lag=L}}
+  const hrAC=lag?60*fs/lag:0;
+  // peak detection
+  const minD=Math.round(fs*0.6*(lag?lag/fs:0.6)),pk=[];
+  for(let i=2;i<y.length-2;i++){if(y[i]>0.3&&y[i]>=y[i-1]&&y[i]>=y[i+1]){
+    let ok=true;for(let k=Math.max(0,i-minD);k<Math.min(y.length,i+minD);k++)if(y[k]>y[i]){ok=false;break}
+    if(ok&&(!pk.length||i-pk[pk.length-1]>=minD)){
+      // parabolic refine
+      const a=y[i-1],b=y[i],c=y[i+1],d=(a-c)/(2*(a-2*b+c)||1);pk.push(i+(isFinite(d)?d:0))}}}
+  let ibi=[];for(let i=1;i<pk.length;i++)ibi.push((pk[i]-pk[i-1])/fs*1000);
+  const m=med(ibi);const good=ibi.filter(v=>v>333&&v<1500&&Math.abs(v-m)<0.25*m);
+  const hrPk=good.length?60000/mean(good):0;
+  let rmssd=0,sdnn=0;
+  if(good.length>8){const dd=[];for(let i=1;i<ibi.length;i++){const a=ibi[i-1],b=ibi[i];if(good.includes(a)&&good.includes(b)&&Math.abs(b-a)<200)dd.push(b-a)}
+    rmssd=Math.sqrt(mean(dd.map(v=>v*v)));sdnn=sd(good)}
+  const agree=hrAC&&hrPk?1-Math.min(1,Math.abs(hrAC-hrPk)/hrPk*4):0;
+  const kept=ibi.length?good.length/ibi.length:0;
+  const quality=Math.round(100*(0.5*agree+0.5*kept));
+  return{hr:hrPk||hrAC,hrAC,rmssd,sdnn,beats:good.length,quality}}
+
+// ---------- report ----------
+function finish(t,x){
+  const r=analyze(t,x);
+  if(!r||!r.hr||r.quality<35){setMsg('Signal too noisy. Press lightly, keep still, retry.','var(--red)');setProg(0);return}
+  lastPulse=r;$('bpm').textContent=Math.round(r.hr);setMsg('Done ✓','var(--grn)');setProg(1);
+  setTimeout(()=>{report(r);show('s3')},700)}
+
+function report(p){
+  const v=id=>parseFloat($(id).value),age=v('age'),sex=$('sex').value,ht=v('ht')/100,wt=v('wt'),waist=v('waist');
+  const bmi=wt/(ht*ht),whtr=waist/(ht*100),sys=v('sys'),dia=v('dia');
+  // IDRS
+  const ageP=age<35?0:age<50?20:30;
+  const wP=sex==='f'?(waist<80?0:waist<90?10:20):(waist<90?0:waist<100?10:20);
+  const idrs=ageP+wP+(+$('act').value)+(+$('fam').value);
+  const F=[];const add=(lvl,txt,pts)=>F.push({lvl,txt,pts});
+  add(idrs>=60?2:idrs>=30?1:0,`Diabetes risk score (IDRS): <b>${idrs}</b>/100 — ${idrs>=60?'high':idrs>=30?'moderate':'low'}`,idrs>=60?3:idrs>=30?1.5:0);
+  add(bmi>=25?2:bmi>=23?1:0,`BMI <b>${bmi.toFixed(1)}</b> — ${bmi>=25?'obese range (Asian cut-off)':bmi>=23?'overweight (Asian cut-off)':bmi<18.5?'underweight':'healthy'}`,bmi>=25?2:bmi>=23?1:0);
+  add(whtr>=0.6?2:whtr>=0.5?1:0,`Waist-to-height <b>${whtr.toFixed(2)}</b> — ${whtr>=0.5?'belly fat above healthy (keep waist < half your height)':'healthy'}`,whtr>=0.6?2:whtr>=0.5?1:0);
+  if(sys&&dia){const l=sys>=140||dia>=90?2:sys>=130||dia>=80?1:0;add(l,`Blood pressure <b>${sys}/${dia}</b> — ${l===2?'high':l===1?'elevated':'normal'}`,l*1.5)}
+  else add(1,'Blood pressure unknown — get it checked',0);
+  const hr=Math.round(p.hr);add(hr>90?2:hr>80?1:0,`Resting heart rate <b>${hr}</b> bpm — ${hr>90?'high; linked with higher cardiometabolic risk':hr>80?'upper-normal':hr<50?'low (fine if you are very fit)':'good'}`,hr>90?1.5:hr>80?0.75:0);
+  if(p.rmssd){const lo=age<30?30:age<45?24:age<60?18:14;add(p.rmssd<lo?1:0,`HRV (RMSSD) <b>${Math.round(p.rmssd)}</b> ms — ${p.rmssd<lo?'below typical for your age; stress, poor sleep or low fitness':'in typical range'}`,p.rmssd<lo?0.75:0)}
+  if(+$('smk').value)add(2,'Current tobacco use',2);
+  if(+$('glu').value)add(2,'History of high blood sugar',2.5);
+  const score=F.reduce((s,f)=>s+f.pts,0);
+  const band=score>=6?['High','var(--red)']:score>=3?['Moderate','var(--amb)']:['Low','var(--grn)'];
+  $('overall').innerHTML=`<p class="sub">Cardiometabolic risk</p><div class="band" style="color:${band[1]}">${band[0]}</div><p class="sub">${F.filter(f=>f.lvl===2).length} high · ${F.filter(f=>f.lvl===1).length} watch · ${F.filter(f=>f.lvl===0).length} good</p>`;
+  $('stats').innerHTML=[['Heart rate',hr,'bpm'],['HRV RMSSD',p.rmssd?Math.round(p.rmssd):'—','ms'],['SDNN',p.sdnn?Math.round(p.sdnn):'—','ms'],['Signal quality',p.quality,'%']].map(s=>`<div class="stat"><span>${s[0]}</span><b>${s[1]}</b><span>${s[2]}</span></div>`).join('');
+  $('qual').textContent=`${p.beats} clean beats analysed. ${p.quality<60?'Quality is fair — retake sitting still for a better HRV read.':''}`;
+  const col=['var(--grn)','var(--amb)','var(--red)'];
+  $('flags').innerHTML=F.sort((a,b)=>b.lvl-a.lvl).map(f=>`<div class="flag"><div class="dot" style="background:${col[f.lvl]}"></div><div>${f.txt}</div></div>`).join('');
+  const N=[];
+  if(idrs>=30||+$('glu').value||bmi>=23)N.push('Get <b>HbA1c + fasting glucose</b> tested.');
+  if(score>=3||age>=35)N.push('Get a <b>lipid profile</b> (cholesterol, triglycerides).');
+  if(!(sys&&dia)||sys>=130||dia>=80)N.push('Check <b>blood pressure</b> on a cuff — twice, on 2 different days.');
+  if(whtr>=0.5)N.push(`Aim waist under <b>${Math.round(ht*50)} cm</b>.`);
+  if(+$('act').value>=20)N.push('Add <b>150 min/week</b> brisk walking; 10-min walk after meals lowers sugar spikes.');
+  if(p.rmssd&&F.some(f=>f.txt.includes('HRV')&&f.lvl))N.push('Prioritise sleep (7–8 h); rescan mornings to track HRV.');
+  if(band[0]==='High')N.push('<b>See a doctor</b> soon with these results.');
+  $('next').innerHTML=N.map(n=>`<div class="flag"><div class="dot" style="background:var(--red)"></div><div>${n}</div></div>`).join('')||'<p class="sub">Keep it up. Rescan monthly.</p>';
+  // history
+  let H=[];try{H=JSON.parse(localStorage.getItem('pulse_hist')||'[]')}catch(e){}
+  H.unshift({d:new Date().toLocaleString([], {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}),hr,hrv:p.rmssd?Math.round(p.rmssd):'—',band:band[0]});H=H.slice(0,20);
+  try{localStorage.setItem('pulse_hist',JSON.stringify(H))}catch(e){}
+  $('hist').innerHTML=H.map(h=>`<div class="hist"><span>${h.d}</span><span>${h.hr} bpm · HRV ${h.hrv} · ${h.band}</span></div>`).join('')}
+
+$('again').onclick=()=>{setProg(0);$('bpm').textContent='--';setMsg('Ready');$('file').value='';show('s2')};
+</script>
+</body>
+</html>
